@@ -87,10 +87,9 @@ def testProtocolInstanceCannotBecomeActiveWithLessThanFourServers(
         node_n = get_node_by_name(current_node_set, n)
         disconnect_node_and_ensure_disconnected(looper,
                                                 current_node_set,
-                                                node_n,
+                                                n,
                                                 timeout=nodeCount,
                                                 stopNode=True)
-        looper.removeProdable(node_n)
         current_node_set.remove(node_n)
 
     # looper.runFor(10)
