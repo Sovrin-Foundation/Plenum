@@ -16,7 +16,16 @@ from binascii import hexlify, unhexlify
 from collections import deque
 from typing import Mapping, Tuple, Any, Union, Optional
 
-from common.exceptions import PlenumTypeError, PlenumValueError
+from common.exceptions import (
+    PlenumTypeError,
+    PlenumValueError,
+    PlenumTransportError,
+    PlenumMultiIdentError,
+    TooBigMessage,
+    IdentityIsUnknown,
+    NoSocketForIdentity,
+    EAgainError
+)
 
 # import stp_zmq.asyncio
 import zmq.auth
@@ -33,6 +42,7 @@ from stp_core.network.network_interface import NetworkInterface
 from stp_zmq.util import createEncAndSigKeys, \
     moveKeyFilesToCorrectLocations, createCertsFromKeys
 from stp_zmq.remote import Remote, set_keepalive, set_zmq_internal_queue_size
+# TODO it seems wrong designed that we import things from plenum here
 from plenum.common.exceptions import InvalidMessageExceedingSizeException
 from stp_core.validators.message_length_validator import MessageLenValidator
 
@@ -439,8 +449,8 @@ class ZStack(NetworkInterface):
         try:
             self.msgLenVal.validate(msg)
             decoded = msg.decode()
-        except (UnicodeDecodeError, InvalidMessageExceedingSizeException) as ex:
-            errstr = 'Message will be discarded due to {}'.format(ex)
+        except (UnicodeDecodeError, InvalidMessageExceedingSizeException) as exc:
+            errstr = 'Message will be discarded due to {}'.format(exc)
             frm = self.remotesByKeys[ident].name if ident in self.remotesByKeys else ident
             logger.error("Got from {} {}".format(frm, errstr))
             self.msgRejectHandler(errstr, frm)
@@ -630,28 +640,25 @@ class ZStack(NetworkInterface):
         if remoteVerkey:
             self.addVerifier(remoteVerkey)
         else:
-            logger.display('{} adding a remote {}({}) without a verkey'.format(self, name, ha))
+            logger.display("{} adding a remote {}({}) without a verkey"
+                           .format(self, name, ha))
         return remote
 
     def sendPingPong(self, remote: Union[str, Remote], is_ping=True):
         msg = self.pingMessage if is_ping else self.pongMessage
         action = 'ping' if is_ping else 'pong'
         name = remote if isinstance(remote, (str, bytes)) else remote.name
-        r = self.send(msg, name)
-        if r[0] is True:
-            logger.debug('{} {}ed {}'.format(self.name, action, name))
-        elif r[0] is False:
-            # TODO: This fails the first time as socket is not established,
+        try:
+            self.send(msg, name)
+        # TODO shouldn't we pass exceptions to upper stack
+        except PlenumTransportError as exc:
+            # TODO: ??? This fails the first time as socket is not established,
             # need to make it retriable
-            logger.debug('{} failed to {} {} {}'
-                         .format(self.name, action, name, r[1]),
-                         extra={"cli": False})
-        elif r[0] is None:
-            logger.debug('{} will be sending in batch'.format(self))
+            logger.warning(("{} failed to {} {}, reason: {}"
+                            .format(self.name, action, name, exc)),
+                           extra={"cli": False})
         else:
-            logger.error('{}{} got an unexpected return value {} while sending'.
-                         format(CONNECTION_PREFIX, self, r))
-        return r[0]
+            logger.debug('{} {}ed {}'.format(self.name, action, name))
 
     def handlePingPong(self, msg, frm, ident):
         if msg in (self.pingMessage, self.pongMessage):
@@ -674,41 +681,40 @@ class ZStack(NetworkInterface):
         self.last_heartbeat_at = time.perf_counter()
 
     def send(self, msg: Any, remoteName: str = None, ha=None):
+        prefix = "{}{}".format(CONNECTION_PREFIX, self)
         if self.onlyListener:
-            return self.transmitThroughListener(msg, remoteName)
+            self.transmitThroughListener(msg, remoteName)
         else:
             if remoteName is None:
-                r = []
-                e = []
+                errors = []
                 # Serializing beforehand since to avoid serializing for each
                 # remote
                 try:
                     msg = self.prepare_to_send(msg)
-                except InvalidMessageExceedingSizeException as ex:
-                    err_str = '{}Cannot send message. Error {}'.format(CONNECTION_PREFIX, ex)
-                    logger.warning(err_str)
-                    return False, err_str
+                except InvalidMessageExceedingSizeException as exc:
+                    raise TooBigMessage(msg, ident=remoteName,
+                                        msg_len=exc.actLen,
+                                        max_len=exc.expLen,
+                                        prefix=prefix) from exc
                 for uid in self.remotes:
-                    res, err = self.transmit(msg, uid, serialized=True)
-                    r.append(res)
-                    e.append(err)
-                e = list(filter(lambda x: x is not None, e))
-                ret_err = None if len(e) == 0 else "\n".join(e)
-                return all(r), ret_err
+                    try:
+                        self.transmit(msg, uid, serialized=True)
+                    except PlenumTransportError as exc:
+                        errors.append(exc)
+
+                if errors:
+                    raise PlenumMultiIdentError(errors, prefix=prefix)
             else:
-                return self.transmit(msg, remoteName)
+                self.transmit(msg, remoteName)
 
     def transmit(self, msg, uid, timeout=None, serialized=False):
         remote = self.remotes.get(uid)
-        err_str = None
+        prefix = "{}{}".format(CONNECTION_PREFIX, self)
         if not remote:
-            logger.debug("Remote {} does not exist!".format(uid))
-            return False, err_str
+            raise IdentityIsUnknown(uid, msg=msg, prefix=prefix)
         socket = remote.socket
         if not socket:
-            logger.debug('{} has uninitialised socket '
-                         'for remote {}'.format(self, uid))
-            return False, err_str
+            raise NoSocketForIdentity(uid, msg=msg, prefix=prefix)
         try:
             if not serialized:
                 msg = self.prepare_to_send(msg)
@@ -716,17 +722,22 @@ class ZStack(NetworkInterface):
             socket.send(msg, flags=zmq.NOBLOCK)
             logger.trace('{} transmitting message {} to {}'.format(self, msg, uid))
             if not remote.isConnected and msg not in self.healthMessages:
-                logger.info('Remote {} is not connected - message will not be sent immediately.'
-                            'If this problem does not resolve itself - check your firewall settings'.format(uid))
-            return True, err_str
+                logger.info('Remote {} is not connected - '
+                            'message will not be sent immediately.'
+                            'If this problem does not resolve itself - '
+                            'check your firewall settings'.format(uid))
         except zmq.Again:
-            logger.debug('{} could not transmit message to {}'.format(self, uid))
-        except InvalidMessageExceedingSizeException as ex:
-            err_str = '{}Cannot transmit message. Error {}'.format(CONNECTION_PREFIX, ex)
-            logger.warning(err_str)
-        return False, err_str
+            raise EAgainError(msg, uid, prefix=prefix)
+        except InvalidMessageExceedingSizeException as exc:
+            raise TooBigMessage(msg,
+                                ident=uid,
+                                msg_len=exc.actLen,
+                                max_len=exc.expLen,
+                                prefix=prefix) from exc
 
     def transmitThroughListener(self, msg, ident) -> Tuple[bool, Optional[str]]:
+        prefix = "{}{}".format(CONNECTION_PREFIX, self)
+
         if isinstance(ident, str):
             ident = ident.encode()
         try:
@@ -738,17 +749,17 @@ class ZStack(NetworkInterface):
                          format(self, msg, ident))
             self.listener.send_multipart([ident, msg], flags=zmq.NOBLOCK)
         except zmq.Again:
-            return False, None
-        except InvalidMessageExceedingSizeException as ex:
-            err_str = '{}Cannot transmit message. Error {}'.format(CONNECTION_PREFIX, ex)
-            logger.warning(err_str)
-            return False, err_str
-        except Exception as e:
-            err_str = '{}{} got error {} while sending through listener to {}'\
-                .format(CONNECTION_PREFIX, self, e, ident)
-            logger.warning(err_str)
-            return False, err_str
-        return True, None
+            raise EAgainError(msg, ident, prefix=prefix)
+        except InvalidMessageExceedingSizeException as exc:
+            raise TooBigMessage(msg,
+                                ident=ident,
+                                msg_len=exc.actLen,
+                                max_len=exc.expLen,
+                                prefix=prefix) from exc
+        except Exception as exc:
+            err_str = ("{}{} got error {} while sending through listener to {}"
+                       .format(CONNECTION_PREFIX, self, exc, ident))
+            raise PlenumTransportError(err_str, msg=msg, ident=ident) from exc
 
     @staticmethod
     def serializeMsg(msg):
@@ -787,8 +798,8 @@ class ZStack(NetworkInterface):
         try:
             public, _ = zmq.auth.load_certificate(filePath)
             return public
-        except (ValueError, IOError) as ex:
-            raise KeyError from ex
+        except (ValueError, IOError) as exc:
+            raise KeyError from exc
 
     @staticmethod
     def loadSecKeyFromDisk(directory, name):
@@ -797,8 +808,8 @@ class ZStack(NetworkInterface):
         try:
             _, secret = zmq.auth.load_certificate(filePath)
             return secret
-        except (ValueError, IOError) as ex:
-            raise KeyError from ex
+        except (ValueError, IOError) as exc:
+            raise KeyError from exc
 
     @property
     def publicKey(self):
@@ -884,8 +895,9 @@ class ZStack(NetworkInterface):
     def _safeRemove(self, filePath):
         try:
             os.remove(filePath)
-        except Exception as ex:
-            logger.info('{} could delete file {} due to {}'.format(self, filePath, ex))
+        except Exception as exc:
+            logger.info("{} failed to delete file {} due to {}"
+                        .format(self, filePath, exc))
 
     def clearLocalRoleKeep(self):
         for d in (self.secretKeysDir, self.sigKeyDir):

@@ -9,7 +9,7 @@ from typing import Dict, Any, Mapping, Iterable, List, Optional, Set, Tuple, Cal
 
 from intervaltree import IntervalTree
 
-from common.exceptions import LogicError
+from common.exceptions import LogicError, PlenumTransportError
 from crypto.bls.bls_key_manager import LoadBLSKeyError
 from plenum.server.inconsistency_watchers import NetworkInconsistencyWatcher
 from state.pruning_state import PruningState
@@ -3063,9 +3063,14 @@ class Node(HasActionQueue, Motor, Propagator, MessageProcessor, HasFileStorage,
                            self.nodestack.remotes.values()]
             recipientsNum = 'all'
 
-        logger.debug("{} sending message {} to {} recipients: {}".
-                     format(self, msg, recipientsNum, remoteNames))
-        self.nodestack.send(msg, *rids, signer=signer, message_splitter=message_splitter)
+        logger.debug("{} sending message {} to {} recipients: {}"
+                     .format(self, msg, recipientsNum, remoteNames))
+        try:
+            self.nodestack.send(msg, *rids, signer=signer,
+                                message_splitter=message_splitter)
+        except PlenumTransportError as exc:
+            logger.warning("{} Failed to send node message, reason: {}"
+                           .format(self, exc))
 
     def sendToNodes(self, msg: Any, names: Iterable[str] = None, message_splitter=None):
         # TODO: This method exists in `Client` too, refactor to avoid

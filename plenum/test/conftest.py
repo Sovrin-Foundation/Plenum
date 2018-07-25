@@ -268,7 +268,6 @@ def logcapture(request, whitelist, concerningLogLevels):
                      'discarding message (NOMINATE|PRIMARY)',
                      '.+ rid .+ has been removed',
                      'last try...',
-                     'has uninitialised socket',
                      'to have incorrect time',
                      'time not acceptable'
                      ]
