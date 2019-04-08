@@ -3,6 +3,7 @@ from operator import itemgetter
 from typing import Mapping
 
 from plenum.common.types import f
+from plenum.common.util import get_utc_epoch
 
 from plenum.common.constants import OP_FIELD_NAME, SCHEMA_IS_STRICT
 from plenum.common.exceptions import MissingProtocolVersionError
@@ -76,16 +77,81 @@ class MessageValidator(FieldValidator):
         return 'validation error [{}]:'.format(self.__class__.__name__)
 
 
+class NetworkMessage:
+    msg_data_cls = None
+
+    def __init__(self, *args, frm: str = None, ts_rcv: int = None, msg_data=None, **kwargs):
+        self._msg_data = self.msg_data_cls(*args, **kwargs) if msg_data is None else msg_data
+        self._frm = frm
+        self._ts_rcv = ts_rcv
+
+    @property
+    def msg_data(self):
+        return self._msg_data
+
+    @property
+    def frm(self):
+        return self._frm
+
+    @frm.setter
+    def frm(self, frm):
+        self._frm = frm.split(':')[0]
+
+    @property
+    def ts_rcv(self):
+        return self._ts_rcv
+
+    def __eq__(self, other):
+        if not issubclass(other.__class__, self.__class__):
+            return False
+        return (self.frm == other.frm) and (self.msg_data == other.msg_data)
+
+    def __hash__(self):
+        return hash(self.frm, self.msg_data)
+
+    def __getattr__(self, item):
+        return getattr(self._msg_data, item)
+
+    def __iter__(self):
+        return iter(self.msg_data)
+
+    def __len__(self):
+        return len(self.msg_data)
+
+    def items(self):
+        return self.msg_data.items()
+
+    def keys(self):
+        return self.msg_data.keys()
+
+    def values(self):
+        return self.msg_data.values()
+
+    def __str__(self):
+        return str(self.msg_data)
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __getitem__(self, key):
+        return self.msg_data[key]
+
+    def __dir__(self):
+        return dir(self.msg_data)
+
+    def __contains__(self, key):
+        return key in self.msg_data
+
+
 class MessageBase(Mapping, MessageValidator):
     typename = None
 
     def __init__(self, *args, **kwargs):
-        if args and kwargs:
-            raise ValueError("*args, **kwargs cannot be used together")
+        # op field is not required since there is self.typename
+        kwargs.pop(OP_FIELD_NAME, None)
 
-        if kwargs:
-            # op field is not required since there is self.typename
-            kwargs.pop(OP_FIELD_NAME, None)
+        if args and kwargs:
+            raise ValueError("*args, **kwargs cannot be used together for fields in schema")
 
         argsLen = len(args or kwargs)
         if self.schema_is_strict and argsLen > len(self.schema):
@@ -165,6 +231,9 @@ class MessageBase(Mapping, MessageValidator):
     def __hash__(self):
         h = 1
         for index, value in enumerate(list(self.__iter__())):
+            # TODO better way: other non hashable types (top level and included)
+            if type(value) is list:
+                value = tuple(value)
             h = h * (index + 1) * (hash(value) + 1)
         return h
 

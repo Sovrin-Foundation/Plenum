@@ -102,11 +102,11 @@ def replica(tconf, viewNo, inst_id, ledger_ids, mock_timestamp, fake_requests, t
     bls_bft_replica = FakeSomething(
         gc=lambda *args: None,
         update_pre_prepare=lambda params, l_id: params,
-        validate_pre_prepare=lambda a, b: None,
-        validate_prepare=lambda a, b: None,
+        validate_pre_prepare=lambda a: None,
+        validate_prepare=lambda a: None,
         update_prepare=lambda a, b: a,
-        process_prepare=lambda a, b: None,
-        process_pre_prepare=lambda a, b: None,
+        process_prepare=lambda a: None,
+        process_pre_prepare=lambda a: None,
         process_order =lambda *args: None
     )
     replica = Replica(
@@ -157,7 +157,7 @@ def multi_sig(fake_multi_sig, request):
 
 
 @pytest.fixture(scope="function")
-def pre_prepare(replica, state_roots, txn_roots, multi_sig, fake_requests):
+def pre_prepare(replica, state_roots, txn_roots, multi_sig, fake_requests, request):
     params = create_pre_prepare_params(state_root=state_roots[DOMAIN_LEDGER_ID],
                                        ledger_id=DOMAIN_LEDGER_ID,
                                        txn_root=txn_roots[DOMAIN_LEDGER_ID],
@@ -167,10 +167,13 @@ def pre_prepare(replica, state_roots, txn_roots, multi_sig, fake_requests):
                                        pool_state_root=state_roots[POOL_LEDGER_ID],
                                        audit_txn_root=txn_roots[AUDIT_LEDGER_ID],
                                        reqs=fake_requests)
-    pp = PrePrepare(*params)
+    marker = request.node.get_marker('pre_prepare_frm')
+    pp = PrePrepare(*params, frm=marker.args[0].split(':')[0] if marker else None)
     return pp
 
 
 @pytest.fixture(scope="function")
-def prepare(pre_prepare):
-    return create_prepare_from_pre_prepare(pre_prepare)
+def prepare(pre_prepare, request):
+    marker = request.node.get_marker('prepare_frm')
+    return create_prepare_from_pre_prepare(
+        pre_prepare, frm=marker.args[0].split(':')[0] if marker else None)

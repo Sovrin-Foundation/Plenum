@@ -3,6 +3,7 @@ from typing import Mapping, NamedTuple, Dict
 
 from common.serializers.serialization import serialize_msg_for_signing
 from plenum.common.constants import REQKEY, FORCE, TXN_TYPE, OPERATION_SCHEMA_IS_STRICT
+from plenum.common.messages.message_base import NetworkMessage
 from plenum.common.messages.client_request import ClientMessageValidator
 from plenum.common.types import f, OPERATION
 from plenum.common.util import getTimeBasedId
@@ -10,7 +11,8 @@ from stp_core.types import Identifier
 from plenum import PLUGIN_CLIENT_REQUEST_FIELDS
 
 
-class Request:
+# TODO inherit MessageBase instead
+class RequestMsgData:
     idr_delimiter = ','
 
     def __init__(self,
@@ -22,6 +24,7 @@ class Request:
                  protocolVersion: int = None,
                  # Intentionally omitting *args
                  **kwargs):
+
         self._identifier = identifier
         self.signature = signature
         self.signatures = signatures
@@ -123,7 +126,7 @@ class Request:
 
     @staticmethod
     def gen_idr_from_sigs(signatures: Dict):
-        return Request.idr_delimiter.join(sorted(signatures.keys()))
+        return RequestMsgData.idr_delimiter.join(sorted(signatures.keys()))
 
     def add_signature(self, identifier, signature):
         if not isinstance(self.signatures, Dict):
@@ -134,13 +137,37 @@ class Request:
         return hash(self.serialized())
 
 
+class Request(NetworkMessage):
+    idr_delimiter = RequestMsgData.idr_delimiter
+
+    msg_data_cls = RequestMsgData
+
+    @classmethod
+    def fromState(cls, state):
+        msg_data = RequestMsgData.fromState(state)
+        return cls(msg_data=msg_data)
+
+    @staticmethod
+    def gen_req_id(*args, **kwargs):
+        return RequestMsgData.gen_req_id(*args, **kwargs)
+
+    @staticmethod
+    def gen_idr_from_sigs(*args, **kwargs):
+        return RequestMsgData.gen_idr_from_sigs(*args, **kwargs)
+
+
 class ReqKey(NamedTuple(REQKEY, [f.DIGEST])):
     pass
 
 
-class SafeRequest(Request, ClientMessageValidator):
+# TODO INDY-1983 tests !!!
+class SafeRequestMsgData(Request, ClientMessageValidator):
     def __init__(self, **kwargs):
         ClientMessageValidator.__init__(self,
                                         operation_schema_is_strict=OPERATION_SCHEMA_IS_STRICT)
         self.validate(kwargs)
         Request.__init__(self, **kwargs)
+
+
+class SafeRequest(Request):
+    msg_data_cls = SafeRequestMsgData

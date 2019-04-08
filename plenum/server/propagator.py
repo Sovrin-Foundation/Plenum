@@ -130,7 +130,7 @@ class Requests(OrderedDict):
 
     def set_finalised(self, req: Request):
         state = self[req.key]
-        if not state.finalised:
+        if state.finalised is None:
             self.finalised_count += 1
         state.set_finalised(req)
 
@@ -163,13 +163,13 @@ class Requests(OrderedDict):
         state = self.get(request_key)
         if not state:
             return
-        if state.finalised:
+        if state.finalised is None:
             self.finalised_count -= 1
         self.pop(request_key, None)
 
     def _clean(self, state):
         if state.executed and state.forwardedTo <= 0:
-            if state.finalised:
+            if state.finalised is not None:
                 self.finalised_count -= 1
             self.pop(state.request.key, None)
 
@@ -180,10 +180,10 @@ class Requests(OrderedDict):
         return req.key in self and sender in self[req.key].propagates
 
     def is_finalised(self, reqKey: str) -> bool:
-        return reqKey in self and self[reqKey].finalised
+        return reqKey in self and self[reqKey].finalised is not None
 
     def digest(self, reqKey: str) -> str:
-        if reqKey in self and self[reqKey].finalised:
+        if reqKey in self and self[reqKey].finalised is not None:
             return self[reqKey].finalised.digest
 
 
@@ -196,7 +196,7 @@ class Propagator:
         self.metrics = metrics
 
     # noinspection PyUnresolvedReferences
-    def propagate(self, request: Request, clientName):
+    def propagate(self, request: Request):
         """
         Broadcast a PROPAGATE to all other nodes
 
@@ -207,27 +207,31 @@ class Propagator:
         else:
             with self.metrics.measure_time(MetricsName.SEND_PROPAGATE_TIME):
                 self.requests.add_propagate(request, self.name)
-                propagate = self.createPropagate(request, clientName)
-                logger.debug("{} propagating request {} from client {}".format(self, request.key, clientName),
+                propagate = self.createPropagate(request)
+                logger.debug("{} propagating request {} from client {}".format(self, request.key, request.frm),
                              extra={"cli": True, "tags": ["node-propagate"]})
                 self.send(propagate)
 
     @staticmethod
     def createPropagate(
-            request: Union[Request, dict], client_name) -> Propagate:
+            request: Request, client_name: str = None) -> Propagate:
         """
         Create a new PROPAGATE for the given REQUEST.
 
         :param request: the client REQUEST
         :return: a new PROPAGATE msg
         """
-        if not isinstance(request, (Request, dict)):
+        if not isinstance(request, Request):
             logger.error("{}Request not formatted properly to create propagate"
                          .format(THREE_PC_PREFIX))
             return
         logger.trace("Creating PROPAGATE for REQUEST {}".format(request))
+        if client_name is None:
+            client_name = request.frm
         request = request.as_dict if isinstance(request, Request) else \
             request
+        # might be se in scope of Propagate request logic
+        # TODO why is it possible
         if isinstance(client_name, bytes):
             client_name = client_name.decode()
         return Propagate(request, client_name)
@@ -259,7 +263,7 @@ class Propagator:
 
         req = self.requests.req_with_acceptable_quorum(request,
                                                        self.quorums.propagate)
-        if req:
+        if req is not None:
             self.requests.set_finalised(req)
             return None
         else:
@@ -281,15 +285,14 @@ class Propagator:
         self.requests.mark_as_forwarded(request, num_replicas)
 
     # noinspection PyUnresolvedReferences
-    def recordAndPropagate(self, request: Request, clientName):
+    def recordAndPropagate(self, request: Request):
         """
         Record the request in the list of requests and propagate.
 
         :param request:
-        :param clientName:
         """
         self.requests.add(request)
-        self.propagate(request, clientName)
+        self.propagate(request)
         self.tryForwarding(request)
 
     def tryForwarding(self, request: Request):

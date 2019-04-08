@@ -37,7 +37,7 @@ from plenum.server.view_change.node_view_changer import create_view_changer
 from plenum.server.view_change.view_changer import ViewChanger
 from plenum.server.primary_selector import PrimarySelector
 from plenum.test.greek import genNodeNames
-from plenum.test.msgs import TestMsg
+from plenum.test.msgs import TestMsgMsgData, TestMsg
 from plenum.test.spy_helpers import getLastMsgReceivedForNode, \
     getAllMsgReceivedForNode, getAllArgs
 from plenum.test.stasher import Stasher
@@ -262,12 +262,12 @@ class TestNodeCore(StackedTester):
         super().blacklistClient(clientName, reason, code)
 
     def validateNodeMsg(self, wrappedMsg):
-        node_message_factory.set_message_class(TestMsg)
+        node_message_factory.set_message_class(TestMsgMsgData, TestMsg)
         return super().validateNodeMsg(wrappedMsg)
 
-    async def eatTestMsg(self, msg, frm):
+    async def eatTestMsg(self, msg):
         logger.debug("{0} received Test message: {1} from {2}".
-                     format(self.nodestack.name, msg, frm))
+                     format(self.nodestack.name, msg, msg.frm))
 
     def service_replicas_outbox(self, *args, **kwargs) -> int:
         for r in self.replicas.values():  # type: TestReplica
@@ -288,9 +288,9 @@ class TestNodeCore(StackedTester):
         state = self.getState(DOMAIN_LEDGER_ID)
         return TestCoreAuthnr(state=state)
 
-    def processRequest(self, request, frm):
+    def processRequest(self, request):
         if request.operation[TXN_TYPE] == 'get_buy':
-            self.send_ack_to_client(request.key, frm)
+            self.send_ack_to_client(request.key, request.frm)
 
             identifier = request.identifier
             req_id = request.reqId
@@ -304,9 +304,9 @@ class TestNodeCore(StackedTester):
                 "buy": result
             }
 
-            self.transmitToClient(Reply(res), frm)
+            self.transmitToClient(Reply(res), request.frm)
         else:
-            super().processRequest(request, frm)
+            super().processRequest(request)
 
 
 node_spyables = [Node.handleOneNodeMsg,

@@ -109,7 +109,7 @@ def checkResponseCorrectnessFromNodes(receivedMsgs: Iterable, reqId: int,
 
 
 def getRepliesFromClientInbox(inbox, reqId) -> list:
-    return list({_: msg for msg, _ in inbox if
+    return list({_: msg for msg in inbox if
                  msg[OP_FIELD_NAME] == REPLY and msg[f.RESULT.nm]
                  [f.REQ_ID.nm] == reqId}.values())
 
@@ -1207,24 +1207,24 @@ def create_commit_params(view_no, pp_seq_no, inst_id=0):
     return [inst_id, view_no, pp_seq_no]
 
 
-def create_commit_no_bls_sig(req_key, inst_id=0):
+def create_commit_no_bls_sig(req_key, inst_id=0, **kwargs):
     view_no, pp_seq_no = req_key
     params = create_commit_params(view_no, pp_seq_no, inst_id=inst_id)
-    return Commit(*params)
+    return Commit(*params, **kwargs)
 
 
-def create_commit_with_bls_sig(req_key, bls_sig):
+def create_commit_with_bls_sig(req_key, bls_sig, **kwargs):
     view_no, pp_seq_no = req_key
     params = create_commit_params(view_no, pp_seq_no)
     params.append(bls_sig)
-    return Commit(*params)
+    return Commit(*params, **kwargs)
 
 
-def create_commit_bls_sig(bls_bft, req_key, pre_prepare):
+def create_commit_bls_sig(bls_bft, req_key, pre_prepare, **kwargs):
     view_no, pp_seq_no = req_key
     params = create_commit_params(view_no, pp_seq_no)
     params = bls_bft.update_commit(params, pre_prepare)
-    return Commit(*params)
+    return Commit(*params, **kwargs)
 
 
 def create_prepare_params(view_no, pp_seq_no, state_root, inst_id=0):
@@ -1237,7 +1237,7 @@ def create_prepare_params(view_no, pp_seq_no, state_root, inst_id=0):
             '1' * 32]
 
 
-def create_prepare_from_pre_prepare(pre_prepare):
+def create_prepare_from_pre_prepare(pre_prepare, **kwargs):
     params = [pre_prepare.instId,
               pre_prepare.viewNo,
               pre_prepare.ppSeqNo,
@@ -1246,13 +1246,13 @@ def create_prepare_from_pre_prepare(pre_prepare):
               pre_prepare.stateRootHash,
               pre_prepare.txnRootHash,
               pre_prepare.auditTxnRootHash]
-    return Prepare(*params)
+    return Prepare(*params, **kwargs)
 
 
-def create_prepare(req_key, state_root, inst_id=0):
+def create_prepare(req_key, state_root, inst_id=0, **kwargs):
     view_no, pp_seq_no = req_key
     params = create_prepare_params(view_no, pp_seq_no, state_root, inst_id=inst_id)
-    return Prepare(*params)
+    return Prepare(*params, **kwargs)
 
 
 def generate_state_root():

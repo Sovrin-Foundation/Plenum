@@ -34,7 +34,8 @@ def mock_schema_audit_txn_root():
 
 def test_process_pre_prepare_validation(replica_with_requests,
                                         pre_prepare):
-    replica_with_requests.processPrePrepare(pre_prepare, replica_with_requests.primaryName)
+    pre_prepare.frm = replica_with_requests.primaryName
+    replica_with_requests.processPrePrepare(pre_prepare)
 
 
 def test_process_pre_prepare_validation_old_schema_no_pool(replica_with_requests,
@@ -45,7 +46,8 @@ def test_process_pre_prepare_validation_old_schema_no_pool(replica_with_requests
     assert f.POOL_STATE_ROOT_HASH.nm not in PrePrepare.schema
 
     pp = PrePrepare(**deserialized_pp)
-    replica_with_requests.processPrePrepare(pp, replica_with_requests.primaryName)
+    pp.frm = replica_with_requests.primaryName
+    replica_with_requests.processPrePrepare(pp)
 
 
 def test_process_pre_prepare_validation_old_schema_no_audit(replica_with_requests,
@@ -56,7 +58,8 @@ def test_process_pre_prepare_validation_old_schema_no_audit(replica_with_request
     assert f.AUDIT_TXN_ROOT_HASH.nm not in PrePrepare.schema
 
     pp = PrePrepare(**deserialized_pp)
-    replica_with_requests.processPrePrepare(pp, replica_with_requests.primaryName)
+    pp.frm = replica_with_requests.primaryName
+    replica_with_requests.processPrePrepare(pp)
 
 
 def test_process_pre_prepare_with_incorrect_pool_state_root(replica_with_requests,
@@ -74,9 +77,10 @@ def test_process_pre_prepare_with_incorrect_pool_state_root(replica_with_request
                                                    audit_txn_root=txn_roots[AUDIT_LEDGER_ID],
                                                    reqs=fake_requests)
     pre_prepare = PrePrepare(*pre_prepare_params)
+    pre_prepare.frm = replica_with_requests.primaryName
 
     with pytest.raises(SuspiciousNode):
-        replica_with_requests.processPrePrepare(pre_prepare, replica_with_requests.primaryName)
+        replica_with_requests.processPrePrepare(pre_prepare)
 
 
 def test_process_pre_prepare_with_incorrect_audit_txn_root(replica_with_requests,
@@ -94,9 +98,10 @@ def test_process_pre_prepare_with_incorrect_audit_txn_root(replica_with_requests
                                                    audit_txn_root="HSai3sMHKeAva4gWMabDrm1yNhezvPHfXnGyHf2ex1L4",
                                                    reqs=fake_requests)
     pre_prepare = PrePrepare(*pre_prepare_params)
+    pre_prepare.frm = replica_with_requests.primaryName
 
     with pytest.raises(SuspiciousNode):
-        replica_with_requests.processPrePrepare(pre_prepare, replica_with_requests.primaryName)
+        replica_with_requests.processPrePrepare(pre_prepare)
 
 
 def test_process_pre_prepare_with_not_final_request(replica, pre_prepare):
@@ -108,7 +113,8 @@ def test_process_pre_prepare_with_not_final_request(replica, pre_prepare):
 
     replica.node.request_propagates = request_propagates
 
-    replica.processPrePrepare(pre_prepare, replica.primaryName)
+    pre_prepare.frm = replica.primaryName
+    replica.processPrePrepare(pre_prepare)
     assert (pre_prepare, replica.primaryName, set(pre_prepare.reqIdr)) in replica.prePreparesPendingFinReqs
 
 
@@ -124,17 +130,20 @@ def test_process_pre_prepare_with_ordered_request(replica, pre_prepare):
     replica.node.request_propagates = request_propagates
 
     with pytest.raises(SuspiciousNode):
-        replica.processPrePrepare(pre_prepare, replica.primaryName)
+        pre_prepare.frm = replica.primaryName
+        replica.processPrePrepare(pre_prepare)
     assert (pre_prepare, replica.primaryName, set(pre_prepare.reqIdr)) not in replica.prePreparesPendingFinReqs
 
 
 def test_suspicious_on_wrong_sub_seq_no(replica_with_requests, pre_prepare):
     pre_prepare.sub_seq_no = 1
-    assert PP_SUB_SEQ_NO_WRONG == replica_with_requests._process_valid_preprepare(pre_prepare,
-                                                                                  replica_with_requests.primaryName)
+    pre_prepare.frm = replica_with_requests.primaryName
+    # TODO INDY-1983 fix
+    assert PP_SUB_SEQ_NO_WRONG == replica_with_requests._process_valid_preprepare(pre_prepare)
 
 
 def test_suspicious_on_not_final(replica_with_requests, pre_prepare):
     pre_prepare.final = False
-    assert PP_NOT_FINAL == replica_with_requests._process_valid_preprepare(pre_prepare,
-                                                                           replica_with_requests.primaryName)
+    pre_prepare.frm = replica_with_requests.primaryName
+    # TODO INDY-1983 fix
+    assert PP_NOT_FINAL == replica_with_requests._process_valid_preprepare(pre_prepare)
