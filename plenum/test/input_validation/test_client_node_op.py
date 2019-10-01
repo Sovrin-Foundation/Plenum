@@ -1,72 +1,34 @@
-import base58
 import pytest
-from plenum.common.constants import BLS_KEY
 
-from plenum.common.messages.client_request import (
-    ClientNodeOperationData, ALIAS, SERVICES, NODE_IP, CLIENT_IP,
-    NODE_PORT, CLIENT_PORT
+from plenum.common.constants import (
+    TXN_TYPE, TARGET_NYM, VERKEY, DATA, NODE, ALIAS
 )
-from plenum.common.util import randomString
+from plenum.common.messages.client_request import ClientNodeOperation
 
-op = ClientNodeOperationData()
+from plenum.test.input_validation.constants import (
+    TEST_TARGET_NYM_LONG, TEST_VERKEY_ABBREVIATED
+)
 
+op = ClientNodeOperation()
 
-def test_only_alias_passes():
-    op.validate({ALIAS: 'aNode'})
-
-
-def test_empty_alias_fails():
+def test_short_length_verkey_and_long_target_nym_failed():
     with pytest.raises(TypeError) as ex_info:
-        op.validate({ALIAS: ''})
-    ex_info.match(
-        'validation error \[ClientNodeOperationData\]: empty string \(alias=\)')
-
-
-def test_missed_alias_fails():
-    with pytest.raises(Exception) as ex_info:
-        op.validate({SERVICES: []})
-    ex_info.match(
-        'validation error \[ClientNodeOperationData\]: missed fields - alias')
-
-
-def test_missed_a_ha_field_fails():
-    with pytest.raises(Exception) as ex_info:
         op.validate({
-            ALIAS: 'aNode',
-            NODE_PORT: 9700,
-            CLIENT_IP: '8.8.8.8',
-            CLIENT_PORT: 9701,
+            TXN_TYPE: NODE,
+            TARGET_NYM: TEST_TARGET_NYM_LONG,
+            VERKEY: TEST_VERKEY_ABBREVIATED,
+            DATA: {
+                ALIAS: 'aNode'
+            }
         })
-    ex_info.match(
-        'validation error \[ClientNodeOperationData\]: missed fields - node_ip')
+    ex_info.match(r'Abbreviated verkey cannot be combined with long target DID')
 
 
-def test_update_services_passes():
-    op.validate({ALIAS: 'aNode', SERVICES: []})
-
-
-def test_update_ha_passes():
+def test_ommitted_verkey_and_long_target_nym_passed():
     op.validate({
-        ALIAS: 'aNode',
-        NODE_IP: '8.8.8.8',
-        NODE_PORT: 9700,
-        CLIENT_IP: '8.8.8.8',
-        CLIENT_PORT: 9701,
-    })
-
-
-def test_update_bls_sign():
-    op.validate({
-        ALIAS: 'aNode',
-        BLS_KEY: base58.b58encode(randomString(128).encode()).decode("utf-8"),
-    })
-
-
-def test_empty_bls_fails():
-    with pytest.raises(TypeError) as ex_info:
-        op.validate({
-            BLS_KEY: '',
+        TXN_TYPE: NODE,
+        TARGET_NYM: TEST_TARGET_NYM_LONG,
+        DATA: {
             ALIAS: 'aNode'
-        })
-    assert 'validation error [ClientNodeOperationData]: b58 decoded ' \
-           'value length 0 should be one of [128] (blskey=)' in ex_info.value.args[0]
+        }
+    })
