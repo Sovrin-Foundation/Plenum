@@ -7,7 +7,7 @@ from common.serializers.serialization import pool_state_serializer
 from crypto.bls.indy_crypto.bls_crypto_indy_crypto import IndyCryptoBlsUtils
 from plenum.common.constants import POOL_LEDGER_ID, NODE, DATA, BLS_KEY, \
     BLS_KEY_PROOF, TARGET_NYM, DOMAIN_LEDGER_ID, NODE_IP, \
-    NODE_PORT, CLIENT_IP, CLIENT_PORT, ALIAS, VERKEY
+    NODE_PORT, CLIENT_IP, CLIENT_PORT, ALIAS, VERKEY, SERVICES, VALIDATOR
 from plenum.common.exceptions import InvalidClientRequest, UnauthorizedClientRequest
 from plenum.common.request import Request
 from plenum.common.txn_util import get_payload_data, get_from
@@ -97,8 +97,9 @@ class NodeHandler(WriteRequestHandler):
         if error:
             return error
 
-        if self._steward_has_node(origin):
-            return "{} already has a node".format(origin)
+        node = self._steward_has_validator_node(origin)
+        if node:
+            return "{} already has node {} as a validator".format(origin, node)
         error = self._is_node_data_conflicting(data)
         if error:
             return "existing data has conflicts with " \
@@ -109,6 +110,11 @@ class NodeHandler(WriteRequestHandler):
         # conflict with any existing node's data
         operation = request.operation
         node_nym = operation.get(TARGET_NYM)
+        origin = request.identifier
+        node = self._steward_has_validator_node(origin)
+        if node:
+            if node != node_nym.encode():
+                return "{} already has node {} as a validator".format(origin, node)
 
         data = operation.get(DATA, {})
         return self._data_error_while_validating_update(data, node_nym)
@@ -134,15 +140,17 @@ class NodeHandler(WriteRequestHandler):
         node_data = self.get_from_state(node_nym, is_committed=is_committed)
         return node_data and node_data[f.IDENTIFIER.nm] == steward_nym
 
-    def _steward_has_node(self, steward_nym) -> bool:
+    def _steward_has_validator_node(self, steward_nym):
         # Cannot use lru_cache since a steward might have a node in future and
         # unfortunately lru_cache does not allow single entries to be cleared
         # TODO: Modify lru_cache to clear certain entities
         for nodeNym, nodeData in self.state.as_dict.items():
             nodeData = self.state_serializer.deserialize(nodeData)
             if nodeData.get(f.IDENTIFIER.nm) == steward_nym:
-                return True
-        return False
+                services = nodeData.get(SERVICES)
+                if services:
+                    if VALIDATOR in services:
+                        return nodeNym
 
     @staticmethod
     def _data_error_while_validating(data, skip_keys):
