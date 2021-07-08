@@ -27,7 +27,7 @@ def test_req_id_to_txn_add(req_ids_to_txn):
     req_ids_to_txn.add(payload_digest, ledger_id, seq_no, digest)
     new_ledger_id, new_seq_no = req_ids_to_txn.get_by_payload_digest(payload_digest)
     assert new_ledger_id == ledger_id
-    assert seq_no == seq_no
+    assert new_seq_no == seq_no
 
     assert req_ids_to_txn.get_by_full_digest(digest) == payload_digest
 
